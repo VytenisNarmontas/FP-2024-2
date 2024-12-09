@@ -1,0 +1,23 @@
+<command> ::= <add_car> | <remove_car> | <list_cars> | <service_car> | <list_services>
+
+<add_car> ::= "add car" " " <license_plate> " " <make> " " <model> " " <year>
+<remove_car> ::= "remove car" " " <license_plate>
+<list_cars> ::= "list cars"
+<service_car> ::= "service car" " " <license_plate> " " <service_type> " " <service_date>
+<list_services> ::= "list services" " " <license_plate>
+
+<make> ::= <word>
+<model> ::= <alphanumeric>+ | <alphanumeric>+ " " <model>
+<license_plate> ::= <alphanumeric>+
+<service_type> ::= <word> | <word> "(" <service_type> ")" | <word> " " <service_type> | <word> ", " <service_type> | <word> "(" <service_type> "), " <service_type>
+<service_date> ::= <day> "-" <month> "-" <year>
+
+<day> ::= <digit> <digit>
+<month> ::= <digit> <digit>
+<year> ::= <digit> <digit> <digit> <digit>
+
+<letter> ::= "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z" | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z"
+
+<word> ::= <letter>+
+<digit> ::= "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"
+<alphanumeric> ::= <word> | <digit>

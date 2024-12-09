@@ -1,0 +1,31 @@
+root@codespaces-190347:/workspaces/fp-2024# stack run fp2024-two
+Welcome! Press [TAB] for auto completion.
+>>> add car ABC123 Toyota Corolla 2020
+Car added: ABC123
+>>> list cars
+Car {carPlate = "ABC123", carMake = "Toyota", carModel = "Corolla", carYear = 2020}
+>>> add car QWE987 Ford Focus 1995
+Car added: QWE987
+>>> service car QWE987 headlights(glass(yellow, white), bulbs(DRL, high beams)), wheels(tires, rims) 2024-01-29
+Car serviced: QWE987
+>>> list services QWE987
+Service {serviceCarPlate = "QWE987", serviceTypes = [headlights(glass(yellow, white), bulbs(DRL, high beams)),wheels(tires, rims)], serviceDate = "2024-01-29"}
+>>> list services ABC123
+>>> list cars
+Car {carPlate = "QWE987", carMake = "Ford", carModel = "Focus", carYear = 1995}
+Car {carPlate = "ABC123", carMake = "Toyota", carModel = "Corolla", carYear = 2020}
+>>> service car QWE987 oil change 2024-01-01
+Car serviced: QWE987
+>>> list services QWE987
+Service {serviceCarPlate = "QWE987", serviceTypes = [oil change], serviceDate = "2024-01-01"}
+Service {serviceCarPlate = "QWE987", serviceTypes = [headlights(glass(yellow, white), bulbs(DRL, high beams)),wheels(tires, rims)], serviceDate = "2024-01-29"}
+>>> remove car ABC123
+Car removed: ABC123
+>>> list cars
+Car {carPlate = "QWE987", carMake = "Ford", carModel = "Focus", carYear = 1995}
+>>> remove car QWE987
+Car removed: QWE987
+>>> list services QWE987
+ERROR:Car not found
+>>> list cars
+>>> 
