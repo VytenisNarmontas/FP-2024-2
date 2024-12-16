@@ -143,14 +143,37 @@ executeLoad stateVar ioChan = do
     sync <- newChan
     writeChan ioChan (Load sync)
     result <- readChan sync
-    case parseStatements result of
-        Right (Batch commands, _) -> do
-            _ <- executeBatch stateVar commands
-            return $ Right (Just "State loaded successfully!")
-        Right (Single command, _) -> do
-            _ <- executeSingle stateVar command
+    let linesOfCommands = lines result
+    case mapM parseCommandLine linesOfCommands of
+        Right commands -> do
+            -- Apply all commands sequentially
+            _ <- applyCommands stateVar commands
             return $ Right (Just "State loaded successfully!")
         Left err -> return $ Left $ "Failed to load state: " ++ err
+
+-- Parse a single command line
+parseCommandLine :: String -> Either String Lib2.Command
+parseCommandLine input =
+    case Lib2.parseQuery input of
+        Right command -> Right command
+        Left err -> Left $ "Error parsing command: " ++ err
+
+-- Apply multiple commands atomically
+applyCommands :: TVar Lib2.State -> [Lib2.Command] -> IO (Either String ())
+applyCommands stateVar commands = atomically $ do
+    currentState <- readTVar stateVar
+    let result = foldl applyCommand (Right currentState) commands
+    case result of
+        Right newState -> do
+            writeTVar stateVar newState
+            return $ Right ()
+        Left err -> return $ Left err
+  where
+    applyCommand (Left err) _ = Left err
+    applyCommand (Right state) command =
+        case Lib2.stateTransition state command of
+            Right (_, newState) -> Right newState
+            Left err -> Left err
 
 -- File handling thread
 storageOpLoop :: Chan StorageOp -> IO ()
@@ -175,8 +198,8 @@ marshallState state = Batch (serializeState state)  -- Implement `serializeState
 
 -- Renders Statements into a String
 renderStatements :: Statements -> String
-renderStatements (Batch commands) = unlines (map show commands)
-renderStatements (Single command) = show command
+renderStatements (Batch commands) = unlines (map renderCommand commands)
+renderStatements (Single command) = renderCommand command
 
 serializeState :: Lib2.State -> [Lib2.Command]
 serializeState (Lib2.State cars services) = 
@@ -194,3 +217,25 @@ deserializeState commands =
            | Lib2.AddCar plate make model year <- commands ]
     services = [ Lib2.Service plate types date
                | Lib2.ServiceCar plate types date <- commands ]
+
+renderCommand :: Lib2.Command -> String
+renderCommand (Lib2.AddCar plate make model year) =
+    "add car " ++ plate ++ " " ++ make ++ " " ++ model ++ " " ++ show year
+renderCommand (Lib2.RemoveCar plate) =
+    "remove car " ++ plate
+renderCommand (Lib2.ServiceCar plate serviceTypes date) =
+    "service car " ++ plate ++ " " ++ renderServiceTypes serviceTypes ++ " " ++ date
+renderCommand Lib2.ListCars =
+    "list cars"
+renderCommand (Lib2.ListServices plate) =
+    "list services " ++ plate
+
+renderServiceTypes :: [Lib2.ServiceType] -> String
+renderServiceTypes [] = ""
+renderServiceTypes [service] = renderServiceType service
+renderServiceTypes (service:rest) = renderServiceType service ++ ", " ++ renderServiceTypes rest
+
+renderServiceType :: Lib2.ServiceType -> String
+renderServiceType (Lib2.SimpleService name) = name
+renderServiceType (Lib2.NestedService name subServices) =
+    name ++ "(" ++ renderServiceTypes subServices ++ ")"
