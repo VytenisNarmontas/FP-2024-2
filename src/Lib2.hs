@@ -92,7 +92,7 @@ data Command
   | ServiceCar String [ServiceType] String  -- Service a car (plate, services, date)
   | ListCars                                -- List all cars
   | ListServices String                     -- List services for a specific car
-  deriving (Show)
+  deriving (Show, Eq)
 
 -- Function that applies commands and manages system state
 stateTransition :: State -> Command -> Either String ([String], State)
@@ -110,7 +110,7 @@ stateTransition state@(State oldCars oldServices) cmd = case cmd of
             Nothing -> Left "Car not found"
             Just car -> Right (["Car removed: " ++ plate], State (delete car oldCars) oldServices)
 
-    -- Adding a service record to a car
+    -- Adding a service recddord to a car
     ServiceCar plate serviceTypes date -> 
         case findCar plate oldCars of
             Nothing -> Left "Car not found"

@@ -10,167 +10,187 @@ module Lib3
     ) where
 
 import Control.Concurrent ( Chan )
-import Control.Concurrent.STM(STM, TVar)
+import Control.Concurrent.STM (STM, TVar)
 import qualified Lib2
+import Data.List (isPrefixOf)  -- Import isPrefixOf4
+import Control.Concurrent.STM (atomically, readTVar, writeTVar)
+import Control.Concurrent (forkIO, Chan, newChan, writeChan, readChan)
+import System.IO (withFile, IOMode(ReadMode, WriteMode), hGetContents, hPutStr)
+import Control.Monad (forever)
+
+filename :: String
+filename = "state.txt"
 
 data StorageOp = Save String (Chan ()) | Load (Chan String)
--- | This function is started from main
--- in a dedicated thread. It must be used to control
--- file access in a synchronized manner: read requests
--- from chan, do the IO operations needed and respond
--- to a channel provided in a request.
--- Modify as needed.
+data Statements = Batch [Lib2.Command]
+               | Single Lib2.Command
+               deriving (Show, Eq)
+
+data Command = StatementCommand Statements
+             | LoadCommand
+             | SaveCommand
+             deriving (Show, Eq)
+
+-- Parses user's input
+parseCommand :: String -> Either String (Command, String)
+parseCommand input =
+    case words input of
+        ("load":_) -> Right (LoadCommand, "")
+        ("save":_) -> Right (SaveCommand, "")
+        _ -> case parseStatements input of
+                Right (statements, rest) -> Right (StatementCommand statements, rest)
+                Left err -> Left err
+
+-- Parses Statement: either a batch or a single command
+parseStatements :: String -> Either String (Statements, String)
+parseStatements input
+    | "BEGIN" `elem` words input = parseBatch input
+    | otherwise = parseSingle input
+
+-- Parse batch of commands wrapped in BEGIN ... END
+parseBatch :: String -> Either String (Statements, String)
+parseBatch input = 
+    case parseString "BEGIN" input of
+        Right (_, rest1) -> 
+            let commands = parseMultipleCommands rest1
+            in case commands of
+                Right (cmds, rest2) -> 
+                    case parseString "END" rest2 of
+                        Right (_, remaining) -> Right (Batch cmds, remaining)
+                        Left err -> Left $ "Missing END: " ++ err
+                Left err -> Left err
+        Left err -> Left err
+
+-- Parse a single command
+parseSingle :: String -> Either String (Statements, String)
+parseSingle input = 
+    case Lib2.parseQuery input of
+        Right query -> Right (Single query, "")  -- Return the command without leftover input
+        Left err -> Left err
+
+-- Parse multiple commands separated by semicolons
+parseMultipleCommands :: String -> Either String ([Lib2.Command], String)
+parseMultipleCommands input = go input []
+  where
+    go :: String -> [Lib2.Command] -> Either String ([Lib2.Command], String)
+    go [] acc = Right (reverse acc, "")  -- No more input, return accumulated commands
+    go str acc =
+        case Lib2.parseQuery str of
+            Right cmd ->
+                let rest' = dropWhile (`elem` " ;") str  -- Simulate "remaining input" behavior
+                in if "END" `isPrefixOf` rest'
+                    then Right (reverse (cmd : acc), drop 3 rest')  -- Drop "END" from input
+                    else go rest' (cmd : acc)
+            Left err -> Left err
+
+-- Utility function to parse a specific keyword
+parseString :: String -> String -> Either String (String, String)
+parseString keyword input =
+    let trimmed = dropWhile (== ' ') input
+    in if take (length keyword) trimmed == keyword
+       then Right (keyword, drop (length keyword) trimmed)
+       else Left $ "Expected " ++ keyword ++ ", found " ++ take (length keyword) trimmed
+-- STM-based State Transition Function
+stateTransition :: TVar Lib2.State -> Command -> Chan StorageOp -> IO (Either String (Maybe String))
+stateTransition stateVar command ioChan = case command of
+    StatementCommand (Single query) -> executeSingle stateVar query
+    StatementCommand (Batch queries) -> executeBatch stateVar queries
+    LoadCommand -> executeLoad stateVar ioChan
+    SaveCommand -> executeSave stateVar ioChan
+
+-- Execute a single command atomically
+executeSingle :: TVar Lib2.State -> Lib2.Command -> IO (Either String (Maybe String))
+executeSingle stateVar query = atomically $ do
+    currentState <- readTVar stateVar
+    case Lib2.stateTransition currentState query of
+        Right (output, newState) -> do
+            writeTVar stateVar newState  -- Update state atomically
+            return $ Right (Just (unlines output))
+        Left err -> return $ Left err  -- No update if command fails
+
+-- Execute a batch of commands atomically
+executeBatch :: TVar Lib2.State -> [Lib2.Command] -> IO (Either String (Maybe String))
+executeBatch stateVar queries = atomically $ do
+    currentState <- readTVar stateVar
+    let applyBatch state [] = Right ([], state)
+        applyBatch state (q:qs) =
+            case Lib2.stateTransition state q of
+                Right (output, newState) -> 
+                    case applyBatch newState qs of
+                        Right (outputs, finalState) -> Right (output ++ outputs, finalState)
+                        Left err -> Left err
+                Left err -> Left err
+
+    case applyBatch currentState queries of
+        Right (outputs, newState) -> do
+            writeTVar stateVar newState
+            return $ Right (Just (unlines outputs))
+        Left err -> return $ Left err
+
+executeSave :: TVar Lib2.State -> Chan StorageOp -> IO (Either String (Maybe String))
+executeSave stateVar ioChan = do
+    currentState <- atomically $ readTVar stateVar
+    let statements = marshallState currentState
+        rendered = renderStatements statements
+    sync <- newChan
+    writeChan ioChan (Save rendered sync)
+    readChan sync
+    return $ Right (Just "State saved successfully!")
+
+-- Load the state from a file
+executeLoad :: TVar Lib2.State -> Chan StorageOp -> IO (Either String (Maybe String))
+executeLoad stateVar ioChan = do
+    sync <- newChan
+    writeChan ioChan (Load sync)
+    result <- readChan sync
+    case parseStatements result of
+        Right (Batch commands, _) -> do
+            _ <- executeBatch stateVar commands
+            return $ Right (Just "State loaded successfully!")
+        Right (Single command, _) -> do
+            _ <- executeSingle stateVar command
+            return $ Right (Just "State loaded successfully!")
+        Left err -> return $ Left $ "Failed to load state: " ++ err
+
+-- File handling thread
 storageOpLoop :: Chan StorageOp -> IO ()
 storageOpLoop chan = forever $ do
-  op <- readChan chan
-  case op of
-    Save content replyChan -> 
-      withFile "state.txt" WriteMode $ \h -> do
-        hPutStrLn h content
-        writeChan replyChan ()
-    Load replyChan -> 
-      withFile "state.txt" ReadMode $ \h -> do
-        content <- hGetContents h
-        writeChan replyChan content
+    let handleSave contents = withFile filename WriteMode (\h -> hPutStr h contents)
+        handleLoad = withFile filename ReadMode (\h -> do
+            contents <- hGetContents h
+            length contents `seq` return contents)  -- Force full evaluation of contents
+    op <- readChan chan
+    case op of
+        Save contents sync -> do
+            handleSave contents
+            writeChan sync ()
+        Load sync -> do
+            result <- handleLoad
+            writeChan sync result
 
-data Statements = Batch [Lib2.Query] |
-               Single Lib2.Query
-               deriving (Show, Eq)
 
-data Command = StatementCommand Statements |
-               LoadCommand |
-               SaveCommand
-               deriving (Show, Eq)
-
--- | Parses user's input.
-parseCommand :: String -> Either String (Command, String)
-parseCommand input
-  | "save" `isPrefixOf` input = Right (SaveCommand, drop 4 input)
-  | "load" `isPrefixOf` input = Right (LoadCommand, drop 4 input)
-  | "begin" `isPrefixOf` input = parseBatchStatements (drop 5 input)
-  | otherwise = fmap (first StatementCommand) (parseStatements input)
-
-parseBatchStatements :: String -> Either String (Command, String)
-parseBatchStatements input = do
-  (statements, rest) <- parseMultipleStatements input
-  pure (StatementCommand (Batch statements), rest)
-
--- | Parses Statement.
--- Must be used in parseCommand.
--- Reuse Lib2 as much as you can.
--- You can change Lib2.parseQuery signature if needed.
-parseStatements :: String -> Either String (Statements, String)
-parseStatements input = 
-  case Lib2.parseQuery input of
-    Right query -> Right (Single query, "")
-    Left _ -> 
-      case input of
-        "end" -> Left "Empty batch"
-        _ -> Left "Unable to parse statement"
-
-parseMultipleStatements :: String -> Either String ([Lib2.Query], String)
-parseMultipleStatements input = go [] input
-  where
-    go acc [] = Left "Unclosed batch"
-    go acc ('e':'n':'d':rest) = Right (reverse acc, rest)
-    go acc str = 
-      case Lib2.parseQuery str of
-        Right (query, remaining) -> 
-          case remaining of
-            (';':xs) -> go (query:acc) (dropWhile (==' ') xs)
-            "end" -> Right (reverse (query:acc), "end")
-            _ -> Left "Invalid batch syntax"
-        Left _ -> Left "Unable to parse query in batch"
-
--- | Converts program's state into Statements
--- (probably a batch, but might be a single query)
+-- Converts program's state into Statements
 marshallState :: Lib2.State -> Statements
-marshallState (Lib2.State cars services) = 
-  Batch $ carQueries ++ serviceQueries
-  where
-    carQueries = map toAddCarQuery cars
-    serviceQueries = map toServiceQuery services
+marshallState state = Batch (serializeState state)  -- Implement `serializeState`
 
-    toAddCarQuery (Lib2.Car plate make model year) = 
-      Lib2.AddCar plate make model year
-    
-    toServiceQuery (Lib2.Service plate services date) = 
-      Lib2.ServiceCar plate services date
-
--- | Renders Statements into a String which
--- can be parsed back into Statements by parseStatements
--- function. The String returned by this function must be used
--- as persist program's state in a file. 
--- Must have a property test
--- for all s: parseStatements (renderStatements s) == Right(s, "")
+-- Renders Statements into a String
 renderStatements :: Statements -> String
-renderStatements (Single query) = renderQuery query
-renderStatements (Batch queries) = 
-  "begin " ++ intercalate "; " (map renderQuery queries) ++ " end"
+renderStatements (Batch commands) = unlines (map show commands)
+renderStatements (Single command) = show command
 
-renderQuery :: Lib2.Query -> String
-renderQuery (Lib2.AddCar plate make model year) = 
-  printf "add car %s %s %s %d" plate make model year
-renderQuery (Lib2.RemoveCar plate) = 
-  "remove car " ++ plate
-renderQuery (Lib2.ServiceCar plate services date) = 
-  printf "service car %s %s %s" plate 
-    (intercalate ", " (map show services)) date
+serializeState :: Lib2.State -> [Lib2.Command]
+serializeState (Lib2.State cars services) = 
+    -- Serialize cars into AddCar commands
+    map (\car -> Lib2.AddCar (Lib2.carPlate car) (Lib2.carMake car) (Lib2.carModel car) (Lib2.carYear car)) cars
+    ++
+    -- Serialize services into ServiceCar commands
+    map (\service -> Lib2.ServiceCar (Lib2.serviceCarPlate service) (Lib2.serviceTypes service) (Lib2.serviceDate service)) services
 
--- | Updates a state according to a command.
--- Performs file IO via ioChan if needed.
--- This allows your program to share the state
--- between repl iterations, save the state to a file,
--- load the state from the file so the state is preserved
--- between program restarts.
--- Keep IO as small as possible.
--- State update must be executed atomically (STM).
--- Right contains an optional message to print, updated state
--- is stored in transactinal variable
-stateTransition :: TVar Lib2.State -> Command -> Chan StorageOp -> 
-                   IO (Either String (Maybe String))
-stateTransition stateVar cmd ioChan = atomically $ do
-  currentState <- readTVar stateVar
-  case cmd of
-    SaveCommand -> do
-      let statements = marshallState currentState
-          content = renderStatements statements
-      liftIO $ do
-        replyChan <- newChan
-        writeChan ioChan (Save content replyChan)
-        readChan replyChan
-        return (Right (Just "State saved"))
-    
-    LoadCommand -> do
-      liftIO $ do
-        replyChan <- newChan
-        writeChan ioChan (Load replyChan)
-        content <- readChan replyChan
-        case parseStatements content of
-          Right (Batch queries, _) -> do
-            finalState <- foldM applyQuery Lib2.emptyState queries
-            writeTVarIO stateVar finalState
-            return (Right (Just "State loaded"))
-          _ -> return (Left "Failed to parse saved state")
-    
-    StatementCommand statements -> do
-      result <- processStatements currentState statements
-      case result of 
-        Right (message, newState) -> do
-          writeTVar stateVar newState
-          return (Right message)
-        Left err -> return (Left err)
-
-processStatements :: Lib2.State -> Statements -> STM (Either String (Maybe String, Lib2.State))
-processStatements state (Single query) = do
-  result <- applyQuery state query
-  return $ Right (Just ("Executed: " ++ show query), result)
-processStatements state (Batch queries) = do
-  result <- foldM applyQuery state queries
-  return $ Right (Just ("Batch of " ++ show (length queries) ++ " queries executed"), result)
-
-applyQuery :: Lib2.State -> Lib2.Query -> STM Lib2.State
-applyQuery state query = do
-  case Lib2.stateTransition state query of
-    Right (_, newState) -> return newState
-    Left err -> error err  -- Or handle error appropriately
+deserializeState :: [Lib2.Command] -> Lib2.State
+deserializeState commands =
+    Lib2.State cars services
+  where
+    cars = [ Lib2.Car plate make model year
+           | Lib2.AddCar plate make model year <- commands ]
+    services = [ Lib2.Service plate types date
+               | Lib2.ServiceCar plate types date <- commands ]
