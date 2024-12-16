@@ -52,11 +52,14 @@ parseBatch :: String -> Either String (Statements, String)
 parseBatch input = 
     case parseString "BEGIN" input of
         Right (_, rest1) -> 
-            let commands = parseMultipleCommands rest1
+            let commands = parseMultipleCommands (dropWhile (`elem` " \n") rest1)  -- Skip leading whitespace and newlines
             in case commands of
                 Right (cmds, rest2) -> 
-                    case parseString "END" rest2 of
-                        Right (_, remaining) -> Right (Batch cmds, remaining)
+                    case parseString "END" (dropWhile (`elem` " \n") rest2) of
+                        Right (_, remaining) ->
+                            if all (`elem` " \n") remaining  -- Ensure only whitespace/newlines remain
+                                then Right (Batch cmds, "")
+                                else Left $ "Unexpected input after END: " ++ remaining
                         Left err -> Left $ "Missing END: " ++ err
                 Left err -> Left err
         Left err -> Left err
@@ -73,14 +76,15 @@ parseMultipleCommands :: String -> Either String ([Lib2.Command], String)
 parseMultipleCommands input = go input []
   where
     go :: String -> [Lib2.Command] -> Either String ([Lib2.Command], String)
-    go [] acc = Right (reverse acc, "")  -- No more input, return accumulated commands
+    go [] acc = Right (reverse acc, "")
     go str acc =
-        case Lib2.parseQuery str of
-            Right cmd ->
-                let rest' = dropWhile (`elem` " ;") str  -- Simulate "remaining input" behavior
+        let (cmdStr, rest) = break (== ';') str  -- Split at semicolon
+        in case Lib2.parseQuery (trim cmdStr) of
+            Right command ->
+                let rest' = dropWhile (`elem` "; \n") rest  -- Skip semicolon, spaces, and newlines
                 in if "END" `isPrefixOf` rest'
-                    then Right (reverse (cmd : acc), drop 3 rest')  -- Drop "END" from input
-                    else go rest' (cmd : acc)
+                    then Right (reverse (command : acc), rest')
+                    else go rest' (command : acc)
             Left err -> Left err
 
 -- Utility function to parse a specific keyword
@@ -239,3 +243,6 @@ renderServiceType :: Lib2.ServiceType -> String
 renderServiceType (Lib2.SimpleService name) = name
 renderServiceType (Lib2.NestedService name subServices) =
     name ++ "(" ++ renderServiceTypes subServices ++ ")"
+
+trim :: String -> String
+trim = reverse . dropWhile (== ' ') . reverse . dropWhile (== ' ')
