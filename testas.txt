@@ -1,0 +1,23 @@
+1. Sakiau: Error, Is tikruju: 5, Paasikinimas: galvojau, kad nera functoriu, tai bus erroras, bet nepagalvojau, kad cia ju net nereikia, kad veiktu
+2. erroras
+3. just 5
+4. just 5
+5. 
+6. erroras
+7. MyJust 5, turejo but ERROR, nezinau kodel
+8. myjust 5, turejo but ERROR, nezinau kodel
+9. ???
+10. nothing
+11. tesingai atsakiau
+12. teisingai
+13. erroras
+14. 
+15.
+16.
+17.Error
+18.Myjust 5
+19. -------------
+20.
+21-23. teisingai
+24. Just , nesupratau kaip turejo veikti listToMaybe, bet po sito klausimo jau supratau
+25.teisingai

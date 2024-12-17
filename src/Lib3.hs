@@ -12,7 +12,7 @@ module Lib3
 import Control.Concurrent ( Chan )
 import Control.Concurrent.STM (STM, TVar)
 import qualified Lib2
-import Data.List (isPrefixOf)  -- Import isPrefixOf4
+import Data.List (isPrefixOf)
 import Control.Concurrent.STM (atomically, readTVar, writeTVar)
 import Control.Concurrent (forkIO, Chan, newChan, writeChan, readChan)
 import System.IO (withFile, IOMode(ReadMode, WriteMode), hGetContents, hPutStr)
@@ -57,31 +57,29 @@ parseBatch input =
                 Right (cmds, rest2) -> 
                     case parseString "END" (dropWhile (`elem` " \n") rest2) of
                         Right (_, remaining) ->
-                            if all (`elem` " \n") remaining  -- Ensure only whitespace/newlines remain
+                            if all (`elem` " \n") remaining  
                                 then Right (Batch cmds, "")
                                 else Left $ "Unexpected input after END: " ++ remaining
                         Left err -> Left $ "Missing END: " ++ err
                 Left err -> Left err
         Left err -> Left err
 
--- Parse a single command
 parseSingle :: String -> Either String (Statements, String)
 parseSingle input = 
     case Lib2.parseQuery input of
-        Right query -> Right (Single query, "")  -- Return the command without leftover input
+        Right query -> Right (Single query, "")  
         Left err -> Left err
 
--- Parse multiple commands separated by semicolons
 parseMultipleCommands :: String -> Either String ([Lib2.Command], String)
 parseMultipleCommands input = go input []
   where
     go :: String -> [Lib2.Command] -> Either String ([Lib2.Command], String)
     go [] acc = Right (reverse acc, "")
     go str acc =
-        let (cmdStr, rest) = break (== ';') str  -- Split at semicolon
+        let (cmdStr, rest) = break (== ';') str 
         in case Lib2.parseQuery (trim cmdStr) of
-            Right command ->
-                let rest' = dropWhile (`elem` "; \n") rest  -- Skip semicolon, spaces, and newlines
+            Right command -> -- FUNCTOR usage
+                let rest' = dropWhile (`elem` "; \n") rest 
                 in if "END" `isPrefixOf` rest'
                     then Right (reverse (command : acc), rest')
                     else go rest' (command : acc)
@@ -94,6 +92,7 @@ parseString keyword input =
     in if take (length keyword) trimmed == keyword
        then Right (keyword, drop (length keyword) trimmed)
        else Left $ "Expected " ++ keyword ++ ", found " ++ take (length keyword) trimmed
+
 -- STM-based State Transition Function
 stateTransition :: TVar Lib2.State -> Command -> Chan StorageOp -> IO (Either String (Maybe String))
 stateTransition stateVar command ioChan = case command of
@@ -108,7 +107,7 @@ executeSingle stateVar query = atomically $ do
     currentState <- readTVar stateVar
     case Lib2.stateTransition currentState query of
         Right (output, newState) -> do
-            writeTVar stateVar newState  -- Update state atomically
+            writeTVar stateVar newState  -- Update state 
             return $ Right (Just (unlines output))
         Left err -> return $ Left err  -- No update if command fails
 
@@ -127,11 +126,11 @@ executeBatch stateVar queries = atomically $ do
 
     case applyBatch currentState queries of
         Right (outputs, newState) -> do
-            writeTVar stateVar newState  -- Update the state atomically with all changes
+            writeTVar stateVar newState  
             return $ Right (Just (unlines outputs))
         Left err -> return $ Left err
 
-executeSave :: TVar Lib2.State -> Chan StorageOp -> IO (Either String (Maybe String))
+executeSave :: TVar Lib2.State -> Chan StorageOp -> IO (Either String (Maybe String)) -- MONAD usage
 executeSave stateVar ioChan = do
     currentState <- atomically $ readTVar stateVar
     let statements = marshallState currentState
@@ -148,9 +147,8 @@ executeLoad stateVar ioChan = do
     writeChan ioChan (Load sync)
     result <- readChan sync
     let linesOfCommands = lines result
-    case mapM parseCommandLine linesOfCommands of
+    case mapM parseCommandLine linesOfCommands of -- APPLICATIVE usage
         Right commands -> do
-            -- Apply all commands sequentially
             _ <- applyCommands stateVar commands
             return $ Right (Just "State loaded successfully!")
         Left err -> return $ Left $ "Failed to load state: " ++ err
@@ -185,7 +183,7 @@ storageOpLoop chan = forever $ do
     let handleSave contents = withFile filename WriteMode (\h -> hPutStr h contents)
         handleLoad = withFile filename ReadMode (\h -> do
             contents <- hGetContents h
-            length contents `seq` return contents)  -- Force full evaluation of contents
+            length contents `seq` return contents)
     op <- readChan chan
     case op of
         Save contents sync -> do
@@ -198,7 +196,7 @@ storageOpLoop chan = forever $ do
 
 -- Converts program's state into Statements
 marshallState :: Lib2.State -> Statements
-marshallState state = Batch (serializeState state)  -- Implement `serializeState`
+marshallState state = Batch (serializeState state) 
 
 -- Renders Statements into a String
 renderStatements :: Statements -> String
@@ -207,10 +205,8 @@ renderStatements (Single command) = renderCommand command
 
 serializeState :: Lib2.State -> [Lib2.Command]
 serializeState (Lib2.State cars services) = 
-    -- Serialize cars into AddCar commands
     map (\car -> Lib2.AddCar (Lib2.carPlate car) (Lib2.carMake car) (Lib2.carModel car) (Lib2.carYear car)) cars
     ++
-    -- Serialize services into ServiceCar commands
     map (\service -> Lib2.ServiceCar (Lib2.serviceCarPlate service) (Lib2.serviceTypes service) (Lib2.serviceDate service)) services
 
 deserializeState :: [Lib2.Command] -> Lib2.State
