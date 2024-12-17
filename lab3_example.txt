@@ -1,0 +1,42 @@
+PS C:\Users\vytna\Universitetas\III.I\FP\fp-2024-2> stack run fp2024-three
+Welcome! Press [TAB] for auto completion, type ':paste' for multiline input
+>>> load
+State loaded successfully!
+>>> list cars
+Car {carPlate = "ABC123", carMake = "Toyota", carModel = "Corolla", carYear = 2020}
+Car {carPlate = "ABC124", carMake = "Ford", carModel = "Focus", carYear = 2005}
+
+>>> :paste 
+-- Entering multi-line mode. Press <Ctrl-D> to finish.
+| BEGIN
+| remove car ABC123;
+| service car ABC124 oil(oil(oil)) 2024-01-01;
+| END
+| 
+Car removed: ABC123
+Car serviced: ABC124
+
+>>> list cars
+Car {carPlate = "ABC124", carMake = "Ford", carModel = "Focus", carYear = 2005}
+
+>>> list services ABC124
+Service {serviceCarPlate = "ABC124", serviceTypes = [oil(oil(oil))], serviceDate = "2024-01-01"}
+
+>>> save
+State saved successfully!
+>>> 
+
+
+
+
+PS C:\Users\vytna\Universitetas\III.I\FP\fp-2024-2> stack run fp2024-three
+Welcome! Press [TAB] for auto completion, type ':paste' for multiline input
+>>> load
+State loaded successfully!
+>>> list cars
+Car {carPlate = "ABC124", carMake = "Ford", carModel = "Focus", carYear = 2005}
+
+>>> list services ABC124
+Service {serviceCarPlate = "ABC124", serviceTypes = [oil(oil(oil))], serviceDate = "2024-01-01"}
+
+>>> 

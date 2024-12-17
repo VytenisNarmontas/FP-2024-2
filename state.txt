@@ -1,3 +1,2 @@
-add car ABC123 Toyota Corolla 2024
 add car ABC124 Ford Focus 2005
-service car ABC123 oil(oil(oil(oil))) 2024-01-01
+service car ABC124 oil(oil(oil)) 2024-01-01

@@ -119,7 +119,7 @@ executeBatch stateVar queries = atomically $ do
     let applyBatch state [] = Right ([], state)
         applyBatch state (q:qs) =
             case Lib2.stateTransition state q of
-                Right (output, newState) -> 
+                Right (output, newState) ->
                     case applyBatch newState qs of
                         Right (outputs, finalState) -> Right (output ++ outputs, finalState)
                         Left err -> Left err
@@ -127,7 +127,7 @@ executeBatch stateVar queries = atomically $ do
 
     case applyBatch currentState queries of
         Right (outputs, newState) -> do
-            writeTVar stateVar newState
+            writeTVar stateVar newState  -- Update the state atomically with all changes
             return $ Right (Just (unlines outputs))
         Left err -> return $ Left err
 
